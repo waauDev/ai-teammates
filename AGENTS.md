@@ -21,6 +21,130 @@ Apply schema changes only with npm run db:push (drizzle-kit push).
 Never use migrations: do not run drizzle-kit generate or drizzle-kit migrate, and do not create migration files or a drizzle/ folder.
 
 
+## Forms
+
+Forms are shadcn/ui `Field` primitives + react-hook-form + zod 4 (via
+`@hookform/resolvers/zod`). The shadcn style here is `base-nova` on Base UI, not
+Radix. There is no `components/ui/form.tsx` and you must not add one: compose
+fields with the `Field` family from `components/ui/field.tsx`.
+
+Check what already exists before writing UI: `npx shadcn@latest info --json`,
+then `npx shadcn@latest docs <component>` and fetch the example URLs it prints.
+
+Client form:
+
+```tsx
+"use client"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { Controller, useForm } from "react-hook-form"
+import { z } from "zod"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+
+const schema = z.object({ name: z.string().trim().min(1, "Required") })
+const form = useForm<z.infer<typeof schema>>({
+  resolver: zodResolver(schema),
+  defaultValues: { name: "" },
+})
+
+<Controller
+  name="name"
+  control={form.control}
+  render={({ field, fieldState }) => (
+    <Field data-invalid={fieldState.invalid}>
+      <FieldLabel htmlFor="name">Name</FieldLabel>
+      <Input {...field} id="name" aria-invalid={fieldState.invalid} />
+      {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+    </Field>
+  )}
+/>
+```
+
+- Use `<Controller>` (not bare `register`) so `field` and `fieldState` arrive
+  together. Spread `field` onto the control, set `data-invalid` on `Field` and
+  `aria-invalid` on the control, and render errors with
+  `<FieldError errors={[fieldState.error]} />` (it also accepts Standard Schema
+  `issues`).
+- `FieldTitle` for label-styled text that has no control (e.g. a "Face" row),
+  `FieldDescription` for helper text, `FieldGroup` to space a stack of fields.
+- zod is v4: `import { z } from "zod"`, `zodResolver` from
+  `"@hookform/resolvers/zod"`.
+- Keep the form schema in the client component (or another zod-only module).
+  Never import `lib/db/schema.ts` into a client component: it drags drizzle-orm
+  into the browser bundle.
+
+Server-side validation uses a schema generated from the table, never a
+hand-written one. In `lib/db/schema.ts`:
+
+```ts
+import { createInsertSchema } from "drizzle-zod"
+
+export const insertBotSchema = createInsertSchema(bots, {
+  name: (s) => s.trim().min(1).max(50),
+  instructions: (s) => s.max(1000).optional(),
+})
+export const createBotSchema = insertBotSchema.omit({
+  id: true, userId: true, createdAt: true, sandboxId: true,
+})
+export type CreateBotInput = z.infer<typeof createBotSchema>
+```
+
+- Add per-column rules in the second argument. A refined nullable column loses
+  its insert optionality, so append `.optional()` yourself when the column is
+  optional.
+- `.omit()` the columns the server owns (`userId`, `id`, `createdAt`,
+  `sandboxId`) so a client can never set them.
+
+Server actions live in `actions/<name>.ts`, start with `"use server"`, and may
+export only async functions:
+
+```ts
+"use server"
+import { auth } from "@clerk/nextjs/server"
+import { revalidatePath } from "next/cache"
+
+export async function createBot(input: CreateBotInput) {
+  const { userId } = await auth()
+  if (!userId) return { ok: false, error: "You must be signed in." }
+
+  const parsed = createBotSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: "Some details need another look." }
+
+  const [bot] = await db.insert(bots).values({ ...parsed.data, userId }).returning()
+  revalidatePath("/")
+  return { ok: true, bot }
+}
+```
+
+- Take the user id from Clerk with `await auth()`; the action owns `userId`.
+- Treat every action as a public endpoint: `safeParse` the input again on the
+  server even though the client already validated it.
+- On auth failure return a result object; do not throw or redirect.
+- Call `revalidatePath` after a write and return a discriminated result
+  (`{ ok: true, ... } | { ok: false, error }`) the client can read.
+
+Dialogs wrap the form. Trigger through Base UI's `render` prop and keep the
+`FieldGroup` and `DialogFooter` inside a single `<form>`:
+
+```tsx
+<Dialog open={open} onOpenChange={setOpen}>
+  <DialogTrigger render={<Button variant="secondary" />}>Open</DialogTrigger>
+  <DialogContent className="sm:max-w-md">
+    <DialogHeader>...</DialogHeader>
+    <form className="flex flex-col gap-4" onSubmit={form.handleSubmit(onSubmit)}>
+      <FieldGroup>...</FieldGroup>
+      <DialogFooter>
+        <Button type="button" variant="outline">Cancel</Button>
+        <Button type="submit">Create bot</Button>
+      </DialogFooter>
+    </form>
+  </DialogContent>
+</Dialog>
+```
+
+Finish forms with `npm run typecheck`, `npx eslint <changed files>`, and
+`npm run build`.
+
+
 ## DiceBear
 
 Use DiceBear 10. Documentation: https://www.dicebear.com/llms.txt
