@@ -1,4 +1,12 @@
-import { index, pgTable, text, timestamp } from "drizzle-orm/pg-core"
+import { relations } from "drizzle-orm"
+import {
+  index,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core"
 import { createInsertSchema } from "drizzle-zod"
 import { nanoid } from "nanoid"
 import { z } from "zod"
@@ -59,3 +67,72 @@ export const createBotSchema = insertBotSchema.omit({
 })
 
 export type CreateBotInput = z.infer<typeof createBotSchema>
+
+export const chatKindEnum = pgEnum("chat_kind", ["direct", "group"])
+
+export const chats = pgTable(
+  "chats",
+  {
+    // nanoid primary key (generated at insert time via Drizzle)
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    // third-party user id (e.g. Clerk)
+    userId: text("user_id").notNull(),
+    // direct chats pair the user with one bot; group chats have a name
+    kind: chatKindEnum("kind").notNull().default("direct"),
+    // only set for group chats; direct chats use the bot's name
+    name: text("name"),
+    lastMessagePreview: text("last_message_preview"),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("chats_user_id_idx").on(t.userId)]
+)
+
+export const chatMembers = pgTable(
+  "chat_members",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    botId: text("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.chatId, t.botId] }),
+    index("chat_members_bot_id_idx").on(t.botId),
+  ]
+)
+
+export type Chat = typeof chats.$inferSelect
+export type NewChat = typeof chats.$inferInsert
+export type ChatMember = typeof chatMembers.$inferSelect
+export type NewChatMember = typeof chatMembers.$inferInsert
+
+export const botsRelations = relations(bots, ({ many }) => ({
+  memberships: many(chatMembers),
+}))
+
+export const chatsRelations = relations(chats, ({ many }) => ({
+  members: many(chatMembers),
+}))
+
+export const chatMembersRelations = relations(chatMembers, ({ one }) => ({
+  chat: one(chats, {
+    fields: [chatMembers.chatId],
+    references: [chats.id],
+  }),
+  bot: one(bots, {
+    fields: [chatMembers.botId],
+    references: [bots.id],
+  }),
+}))
