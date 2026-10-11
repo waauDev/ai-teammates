@@ -50,7 +50,9 @@ export async function createBot(
     db.insert(chatMembers).values({ chatId, botId }),
   ])
 
-  revalidatePath("/")
+  // The sidebar chat list lives in the (dashboard) layout, so revalidate the
+  // layout scope: page scope would leave the sidebar's cached list untouched.
+  revalidatePath("/", "layout")
 
   return { ok: true, bot, chat }
 }

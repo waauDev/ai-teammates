@@ -1,22 +1,104 @@
 "use client"
 
 import { UserButton } from "@clerk/nextjs"
+import { BotIcon, PlusIcon, UsersIcon } from "lucide-react"
+import { useState } from "react"
 
+import { BotDialog } from "@/components/bot-dialog"
+import { ChatAvatar } from "@/components/chat-avatar"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import type { ChatListItem } from "@/queries/bots"
 
-export function AppSidebar() {
+type AppSidebarProps = {
+  chats: ChatListItem[]
+}
+
+export function AppSidebar({ chats }: AppSidebarProps) {
+  const [botOpen, setBotOpen] = useState(false)
+
   return (
     <Sidebar>
-      <SidebarHeader />
-      <SidebarContent />
+      <SidebarHeader className="items-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Create"
+                // Ghost triggers normally keep a muted background while the menu
+                // is open (aria-expanded). Keep the "+" flat and only show a
+                // background on hover.
+                className="aria-expanded:bg-transparent"
+              />
+            }
+          >
+            <PlusIcon />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-48">
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => setBotOpen(true)}>
+                <BotIcon />
+                Create a new bot
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <UsersIcon />
+                Create a group chat
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Chats</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {chats.map((chat) => (
+                <SidebarMenuItem key={chat.id}>
+                  <SidebarMenuButton
+                    render={<a href={`/chats/${chat.id}`} />}
+                    className="h-auto"
+                  >
+                    <ChatAvatar
+                      seed={chat.botAvatar}
+                      className="size-8 shrink-0 rounded-lg"
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate font-medium">{chat.title}</span>
+                      <span className="truncate text-xs text-sidebar-foreground/70">
+                        {chat.lastMessagePreview}
+                      </span>
+                    </div>
+                    <span className="ml-auto shrink-0 text-xs text-sidebar-foreground/70">
+                      {chat.lastMessageAtLabel}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem className="w-full">
@@ -53,6 +135,7 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      <BotDialog open={botOpen} onOpenChange={setBotOpen} />
     </Sidebar>
   )
 }

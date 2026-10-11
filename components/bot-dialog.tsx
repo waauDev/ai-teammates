@@ -81,8 +81,15 @@ function emptyValues(): BotFormValues {
   return { avatar: nanoid(), name: "", job: "", instructions: "" }
 }
 
-function BotDialog() {
-  const [open, setOpen] = useState(false)
+type BotDialogProps = {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+function BotDialog({ open: controlledOpen, onOpenChange }: BotDialogProps = {}) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const open = isControlled ? controlledOpen : uncontrolledOpen
   const [serverError, setServerError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -90,6 +97,14 @@ function BotDialog() {
     resolver: zodResolver(botFormSchema),
     defaultValues: emptyValues(),
   })
+
+  function setOpen(next: boolean) {
+    if (!isControlled) {
+      setUncontrolledOpen(next)
+    }
+
+    onOpenChange?.(next)
+  }
 
   function handleOpenChange(next: boolean) {
     if (isPending) {
@@ -132,10 +147,12 @@ function BotDialog() {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button variant="secondary" />}>
-        <PlusIcon data-icon="inline-start" />
-        Create a new bot
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger render={<Button variant="secondary" />}>
+          <PlusIcon data-icon="inline-start" />
+          Create a new bot
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New bot</DialogTitle>
