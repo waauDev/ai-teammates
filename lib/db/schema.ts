@@ -68,6 +68,14 @@ export const createBotSchema = insertBotSchema.omit({
 
 export type CreateBotInput = z.infer<typeof createBotSchema>
 
+// The same editable fields plus the record id, so an update can't touch any
+// column a client isn't allowed to set.
+export const updateBotSchema = createBotSchema.extend({
+  id: z.string().min(1, "Missing bot id."),
+})
+
+export type UpdateBotInput = z.infer<typeof updateBotSchema>
+
 export const chatKindEnum = pgEnum("chat_kind", ["direct", "group"])
 
 export const chats = pgTable(

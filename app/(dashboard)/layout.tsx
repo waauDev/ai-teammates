@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server"
+import { cookies } from "next/headers"
 
 import { AppSidebar } from "@/components/app-sidebar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -11,9 +12,13 @@ export default async function DashboardLayout({
 }>) {
   const { userId } = await auth()
   const chats = userId ? await getChatsForUser(userId) : []
+  // SidebarProvider writes this cookie on every toggle; read it so the state
+  // survives reloads. No cookie (first visit) keeps the default, expanded.
+  const defaultOpen =
+    (await cookies()).get("sidebar_state")?.value !== "false"
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={defaultOpen}>
       <AppSidebar chats={chats} />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>
