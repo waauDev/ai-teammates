@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server"
 import { notFound } from "next/navigation"
 
+import { Chat } from "@/components/chat"
 import { ChatHeader } from "@/components/chat-header"
 import { getChatForUser } from "@/queries/chats"
 
@@ -19,5 +20,10 @@ export default async function ChatPage({
     notFound()
   }
 
-  return <ChatHeader bot={chat.bot} />
+  return (
+    <div className="flex h-svh flex-col">
+      <ChatHeader bot={chat.bot} />
+      <Chat />
+    </div>
+  )
 }
