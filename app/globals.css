@@ -5,6 +5,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
+[data-sidebar="menu-item"] .cl-userButtonTrigger {
+    min-height: 2.625rem;
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: var(--font-sans);
