@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { useChat } from "@ai-sdk/react"
 import { useLoadTranscript, useTriggerChatTransport } from "@trigger.dev/sdk/chat/react"
 import type { TriggerChatTransport } from "@trigger.dev/sdk/chat"
@@ -21,6 +21,14 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message"
 import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+  type ToolPart,
+} from "@/components/ai-elements/tool"
+import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
@@ -29,11 +37,81 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
 
+function ShowScreenOutput({ output }: { output: unknown }) {
+  const result = output as { screenshot?: unknown; mimeType?: unknown } | null
+  if (
+    !result ||
+    typeof result !== "object" ||
+    typeof result.screenshot !== "string" ||
+    typeof result.mimeType !== "string"
+  ) {
+    return <ToolOutput output={output} errorText={undefined} />
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+        Screen
+      </h4>
+      {/* Daytona returns screenshot data as base64; next/image cannot optimize it. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`data:${result.mimeType};base64,${result.screenshot}`}
+        alt="Sandbox screen"
+        className="h-auto w-full rounded-md border"
+      />
+    </div>
+  )
+}
+
+function ToolCall({
+  part,
+  showScreenRequested,
+}: {
+  part: ToolPart
+  showScreenRequested: boolean
+}) {
+  const toolName =
+    part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
+  const done =
+    part.state === "output-available" ||
+    part.state === "output-error" ||
+    part.state === "output-denied"
+  const [userOpen, setUserOpen] = useState<boolean | null>(null)
+  if (toolName === "view_screen") {
+    return showScreenRequested && part.state === "output-available" ? (
+      <ShowScreenOutput output={part.output} />
+    ) : null
+  }
+
+  return (
+    <div className="mb-3">
+      <Tool open={userOpen ?? done} onOpenChange={(open) => setUserOpen(open)}>
+        {part.type === "dynamic-tool" ? (
+          <ToolHeader type={part.type} state={part.state} toolName={toolName} />
+        ) : (
+          <ToolHeader type={part.type} state={part.state} />
+        )}
+        <ToolContent>
+          {toolName === "show_screen" && part.state === "output-available" ? (
+            <ShowScreenOutput output={part.output} />
+          ) : (
+            <>
+              <ToolInput input={part.input} />
+              <ToolOutput output={part.output} errorText={part.errorText} />
+            </>
+          )}
+        </ToolContent>
+      </Tool>
+    </div>
+  )
+}
+
 function Chat({ chatId }: { chatId: string }) {
   const transport = useTriggerChatTransport<typeof chatAgent>({
     task: "chat",
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
-    startSession: ({ chatId, clientData }) => startChatSession({ chatId, clientData }),
+    startSession: ({ chatId }) => startChatSession({ chatId }),
   })
 
   const { messages, isLoading } = useLoadTranscript(chatId, loadChatTranscript, {
@@ -92,19 +170,46 @@ function ChatView({
               description="Type a message below to begin chatting"
             />
           ) : (
-            messages.map((message) => (
-              <Message key={message.id} from={message.role}>
-                <MessageContent>
-                  {message.parts.map((part, index) =>
-                    part.type === "text" ? (
-                      <MessageResponse key={`${message.id}-${index}`}>
-                        {part.text}
-                      </MessageResponse>
-                    ) : null
-                  )}
-                </MessageContent>
-              </Message>
-            ))
+            messages.map((message, messageIndex) => {
+              const showScreenRequested = messages
+                .slice(0, messageIndex)
+                .reverse()
+                .find((previous) => previous.role === "user")
+                ?.parts.some(
+                  (part) =>
+                    part.type === "text" &&
+                    /\b(screenshot|captura|capturar)\b|(?:ver|dime|muestra).{0,24}(?:qué|que).{0,16}(?:hay|aparece|ves) en (?:la )?pantalla|(?:what|show me).{0,24}(?:screen|see)/i.test(part.text)
+                ) ?? false
+
+              return (
+                <Message key={message.id} from={message.role}>
+                  <MessageContent>
+                    {message.parts.map((part, index) => {
+                      if (part.type === "text") {
+                        return (
+                          <MessageResponse key={`${message.id}-${index}`}>
+                            {part.text}
+                          </MessageResponse>
+                        )
+                      }
+                      if (
+                        part.type === "dynamic-tool" ||
+                        part.type.startsWith("tool-")
+                      ) {
+                        return (
+                          <ToolCall
+                            key={`${message.id}-${index}`}
+                            part={part as ToolPart}
+                            showScreenRequested={showScreenRequested}
+                          />
+                        )
+                      }
+                      return null
+                    })}
+                  </MessageContent>
+                </Message>
+              )
+            })
           )}
         </ConversationContent>
         <ConversationScrollButton />

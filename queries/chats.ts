@@ -11,11 +11,32 @@ export type ChatBot = {
   job: string
   instructions: string | null
   avatar: string
+  sandboxId: string | null
 }
 
 export type ChatDetail = {
   id: string
   bot: ChatBot
+}
+
+export async function getChatBot(chatId: string): Promise<ChatBot | null> {
+  const [row] = await db
+    .select({
+      id: bots.id,
+      name: bots.name,
+      job: bots.job,
+      instructions: bots.instructions,
+      avatar: bots.avatar,
+      sandboxId: bots.sandboxId,
+    })
+    .from(chats)
+    .innerJoin(chatMembers, eq(chatMembers.chatId, chats.id))
+    .innerJoin(bots, eq(bots.id, chatMembers.botId))
+    .where(eq(chats.id, chatId))
+    .orderBy(asc(chatMembers.joinedAt))
+    .limit(1)
+
+  return row ?? null
 }
 
 /**
@@ -36,6 +57,7 @@ export async function getChatForUser(
       botJob: bots.job,
       botInstructions: bots.instructions,
       botAvatar: bots.avatar,
+      botSandboxId: bots.sandboxId,
     })
     .from(chats)
     .innerJoin(chatMembers, eq(chatMembers.chatId, chats.id))
@@ -57,6 +79,7 @@ export async function getChatForUser(
       job: row.botJob,
       instructions: row.botInstructions,
       avatar: row.botAvatar,
+      sandboxId: row.botSandboxId,
     },
   }
 }

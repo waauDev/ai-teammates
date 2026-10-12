@@ -6,6 +6,7 @@ import { nanoid } from "nanoid"
 import { revalidatePath } from "next/cache"
 
 import { db } from "@/lib/db"
+import { createBotSandbox, deleteBotSandbox } from "@/lib/daytona"
 import {
   bots,
   chatMembers,
@@ -42,16 +43,33 @@ export async function createBot(
   const botId = nanoid()
   const chatId = nanoid()
 
-  const [[bot], [chat]] = await db.batch([
-    db
-      .insert(bots)
-      .values({ id: botId, ...parsed.data, userId })
-      .returning(),
-    // A direct chat with the new bot; `name` stays null so the UI falls back to
-    // the bot's name.
-    db.insert(chats).values({ id: chatId, userId, kind: "direct" }).returning(),
-    db.insert(chatMembers).values({ chatId, botId }),
-  ])
+  // One sandbox per bot; a failure here aborts creation so no bot row exists
+  // without its sandbox.
+  let sandboxId: string
+  try {
+    sandboxId = await createBotSandbox(botId)
+  } catch {
+    return { ok: false, error: "Couldn't create the bot's sandbox." }
+  }
+
+  let bot: Bot
+  let chat: Chat
+  try {
+    ;[[bot], [chat]] = await db.batch([
+      db
+        .insert(bots)
+        .values({ id: botId, sandboxId, ...parsed.data, userId })
+        .returning(),
+      // A direct chat with the new bot; `name` stays null so the UI falls back to
+      // the bot's name.
+      db.insert(chats).values({ id: chatId, userId, kind: "direct" }).returning(),
+      db.insert(chatMembers).values({ chatId, botId }),
+    ])
+  } catch {
+    // Don't leave a billable sandbox behind if the DB write failed.
+    await deleteBotSandbox(sandboxId).catch(() => {})
+    return { ok: false, error: "Couldn't save the bot." }
+  }
 
   // The sidebar chat list lives in the (dashboard) layout, so revalidate the
   // layout scope: page scope would leave the sidebar's cached list untouched.
@@ -108,17 +126,30 @@ export async function deleteBot(id: string): Promise<DeleteBotResult> {
     return { ok: false, error: "You must be signed in to delete a bot." }
   }
 
-  // Deleting the bot cascades its chat memberships, which drops its chat out of
-  // every query. shortcut: the chat row itself is left behind, unreachable;
-  // delete it too if a chat ever needs to outlive its bots.
   const [bot] = await db
-    .delete(bots)
+    .select()
+    .from(bots)
     .where(and(eq(bots.id, id), eq(bots.userId, userId)))
-    .returning()
+    .limit(1)
 
   if (!bot) {
     return { ok: false, error: "That bot no longer exists." }
   }
+
+  // Delete the sandbox before the row so a failure leaves the bot (and its
+  // sandboxId) intact instead of orphaning a billable sandbox.
+  if (bot.sandboxId) {
+    try {
+      await deleteBotSandbox(bot.sandboxId)
+    } catch {
+      return { ok: false, error: "Couldn't remove the bot's sandbox." }
+    }
+  }
+
+  // Deleting the bot cascades its chat memberships, which drops its chat out of
+  // every query. shortcut: the chat row itself is left behind, unreachable;
+  // delete it too if a chat ever needs to outlive its bots.
+  await db.delete(bots).where(and(eq(bots.id, id), eq(bots.userId, userId)))
 
   revalidatePath("/", "layout")
 
