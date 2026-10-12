@@ -6,11 +6,23 @@ import { z } from "zod"
 import { ensureComputerUse, getBotSandbox } from "@/lib/daytona"
 import { getChatBot } from "@/queries/chats"
 
+// The bot the user picked in the composer for this turn. Optional so a direct
+// chat (or an older client) falls back to the chat's first member.
+export const clientDataSchema = z.object({
+  botId: z.string().min(1).optional(),
+})
+
+// The requested bot when it belongs to the chat, else the first member.
+async function resolveBot(chatId: string, botId?: string) {
+  return (await getChatBot(chatId, botId)) ?? (await getChatBot(chatId))
+}
+
 export const chatAgent = chat.agent({
   id: "chat",
-  tools: (event) => buildSandboxTools(event.chatId),
-  run: async ({ messages, tools, signal, streamText, chatId }) => {
-    const bot = await getChatBot(chatId)
+  clientDataSchema,
+  tools: (event) => buildSandboxTools(event.chatId, event.clientData?.botId),
+  run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
+    const bot = await resolveBot(chatId, clientData?.botId)
 
     return streamText({
       model: openai("gpt-6-astra"),
@@ -22,10 +34,10 @@ export const chatAgent = chat.agent({
   },
 })
 
-function buildSandboxTools(chatId: string) {
+function buildSandboxTools(chatId: string, botId?: string) {
   let sandboxId: Promise<string> | undefined
   const requireSandboxId = () => {
-    sandboxId ??= getChatBot(chatId).then((bot) => {
+    sandboxId ??= resolveBot(chatId, botId).then((bot) => {
       if (!bot?.sandboxId) throw new Error("This bot has no cloud sandbox assigned yet.")
       return bot.sandboxId
     })

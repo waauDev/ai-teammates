@@ -6,7 +6,8 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import { BotDialog } from "@/components/bot-dialog"
-import { ChatAvatar } from "@/components/chat-avatar"
+import { GroupChatAvatar } from "@/components/group-chat-avatar"
+import { GroupChatDialog } from "@/components/group-chat-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -38,14 +39,16 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import type { ChatListItem } from "@/queries/bots"
+import type { BotOption, ChatListItem } from "@/queries/bots"
 
 type AppSidebarProps = {
   chats: ChatListItem[]
+  bots: BotOption[]
 }
 
-export function AppSidebar({ chats }: AppSidebarProps) {
+export function AppSidebar({ chats, bots }: AppSidebarProps) {
   const [botOpen, setBotOpen] = useState(false)
+  const [groupOpen, setGroupOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
@@ -91,7 +94,7 @@ export function AppSidebar({ chats }: AppSidebarProps) {
                 <BotIcon />
                 Create a new bot
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setGroupOpen(true)}>
                 <UsersIcon />
                 Create a group chat
               </DropdownMenuItem>
@@ -132,8 +135,8 @@ export function AppSidebar({ chats }: AppSidebarProps) {
                     // button the avatar fills, so the text is dropped entirely.
                     className="h-auto group-data-[collapsible=icon]:p-0!"
                   >
-                    <ChatAvatar
-                      seed={chat.botAvatar}
+                    <GroupChatAvatar
+                      avatars={chat.memberAvatars}
                       className="size-8 shrink-0 rounded-lg"
                     />
                     <div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
@@ -189,6 +192,11 @@ export function AppSidebar({ chats }: AppSidebarProps) {
         </SidebarMenu>
       </SidebarFooter>
       <BotDialog open={botOpen} onOpenChange={setBotOpen} />
+      <GroupChatDialog
+        bots={bots}
+        open={groupOpen}
+        onOpenChange={setGroupOpen}
+      />
       <CommandDialog
         open={searchOpen}
         onOpenChange={setSearchOpen}
@@ -208,8 +216,8 @@ export function AppSidebar({ chats }: AppSidebarProps) {
                     router.push(`/chats/${chat.id}`)
                   }}
                 >
-                  <ChatAvatar
-                    seed={chat.botAvatar}
+                  <GroupChatAvatar
+                    avatars={chat.memberAvatars}
                     className="size-6 shrink-0 rounded-md"
                   />
                   <span className="truncate">{chat.title}</span>

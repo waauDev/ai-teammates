@@ -9,6 +9,7 @@ import type { UIMessage } from "ai"
 
 import { loadChatTranscript, mintChatAccessToken, startChatSession } from "@/actions/chat"
 import type { chatAgent } from "@/trigger/chat"
+import { ChatAvatar } from "@/components/chat-avatar"
 import {
   Conversation,
   ConversationContent,
@@ -32,10 +33,17 @@ import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
+  PromptInputSelect,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
+import type { ChatBot } from "@/queries/chats"
 
 function ShowScreenOutput({ output }: { output: unknown }) {
   const result = output as { screenshot?: unknown; mimeType?: unknown } | null
@@ -107,11 +115,26 @@ function ToolCall({
   )
 }
 
-function Chat({ chatId }: { chatId: string }) {
+function Chat({
+  chatId,
+  kind,
+  members,
+}: {
+  chatId: string
+  kind: "direct" | "group"
+  members: ChatBot[]
+}) {
+  // In a group chat the reply comes from the picked bot; direct chats have one.
+  const [botId, setBotId] = useState(members[0]?.id ?? "")
+
   const transport = useTriggerChatTransport<typeof chatAgent>({
     task: "chat",
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
-    startSession: ({ chatId }) => startChatSession({ chatId }),
+    startSession: ({ chatId, clientData }) =>
+      startChatSession({ chatId, clientData }),
+    // The transport threads this into every turn's metadata; the agent reads it
+    // to pick which bot answers.
+    clientData: { botId },
   })
 
   const { messages, isLoading } = useLoadTranscript(chatId, loadChatTranscript, {
@@ -129,16 +152,32 @@ function Chat({ chatId }: { chatId: string }) {
   }
 
   return (
-    <ChatView chatId={chatId} transport={transport} initialMessages={messages} />
+    <ChatView
+      chatId={chatId}
+      kind={kind}
+      members={members}
+      botId={botId}
+      onBotIdChange={setBotId}
+      transport={transport}
+      initialMessages={messages}
+    />
   )
 }
 
 function ChatView({
   chatId,
+  kind,
+  members,
+  botId,
+  onBotIdChange,
   transport,
   initialMessages,
 }: {
   chatId: string
+  kind: "direct" | "group"
+  members: ChatBot[]
+  botId: string
+  onBotIdChange: (botId: string) => void
   transport: TriggerChatTransport
   initialMessages: UIMessage[]
 }) {
@@ -220,6 +259,38 @@ function ChatView({
             <PromptInputTextarea placeholder="Send a message..." />
           </PromptInputBody>
           <PromptInputFooter>
+            <PromptInputTools>
+              {kind === "group" && (
+                <PromptInputSelect
+                  value={botId}
+                  onValueChange={(value) => {
+                    if (typeof value === "string") onBotIdChange(value)
+                  }}
+                  items={members.map((member) => ({
+                    value: member.id,
+                    label: member.name,
+                  }))}
+                >
+                  <PromptInputSelectTrigger type="button" size="sm">
+                    <ChatAvatar
+                      seed={
+                        members.find((member) => member.id === botId)?.avatar ??
+                        members[0].avatar
+                      }
+                      className="size-5 rounded-md"
+                    />
+                    <PromptInputSelectValue />
+                  </PromptInputSelectTrigger>
+                  <PromptInputSelectContent align="start">
+                    {members.map((member) => (
+                      <PromptInputSelectItem key={member.id} value={member.id}>
+                        {member.name}
+                      </PromptInputSelectItem>
+                    ))}
+                  </PromptInputSelectContent>
+                </PromptInputSelect>
+              )}
+            </PromptInputTools>
             <PromptInputSubmit status={status} onStop={stop} />
           </PromptInputFooter>
         </PromptInput>

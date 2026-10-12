@@ -7,7 +7,19 @@ import {
   defaultStorage,
   type ChatStartSessionParams,
 } from "@trigger.dev/sdk/ai"
+import { and, eq, inArray } from "drizzle-orm"
+import { nanoid } from "nanoid"
+import { revalidatePath } from "next/cache"
 
+import { db } from "@/lib/db"
+import {
+  bots,
+  chatMembers,
+  chats,
+  createGroupChatSchema,
+  type Chat,
+  type CreateGroupChatInput,
+} from "@/lib/db/schema"
 import { ensureComputerUse, getBotSandbox } from "@/lib/daytona"
 import { getChatForUser } from "@/queries/chats"
 import type { chatAgent } from "@/trigger/chat"
@@ -50,14 +62,80 @@ export async function getChatVncPreviewUrl(chatId: string) {
 
   const chat = await getChatForUser(userId, chatId)
   if (!chat) throw new Error("Unauthorized")
-  if (!chat.bot.sandboxId) throw new Error("This bot has no sandbox assigned.")
+  // Group chats have no desktop panel.
+  if (chat.kind !== "direct") throw new Error("This chat has no desktop.")
 
-  await ensureComputerUse(chat.bot.sandboxId)
-  const sandbox = await getBotSandbox(chat.bot.sandboxId)
+  const sandboxId = chat.members[0]?.sandboxId
+  if (!sandboxId) throw new Error("This bot has no sandbox assigned.")
+
+  await ensureComputerUse(sandboxId)
+  const sandbox = await getBotSandbox(sandboxId)
   const preview = await sandbox.getSignedPreviewUrl(6080, 3600)
   const url = new URL(preview.url)
   url.pathname = "/vnc.html"
   url.searchParams.set("autoconnect", "1")
   url.searchParams.set("resize", "scale")
   return url.toString()
+}
+
+export type CreateGroupChatResult =
+  | { ok: true; chat: Chat }
+  | { ok: false; error: string }
+
+export async function createGroupChat(
+  input: CreateGroupChatInput
+): Promise<CreateGroupChatResult> {
+  const { userId } = await auth()
+
+  if (!userId) {
+    return { ok: false, error: "You must be signed in to create a group chat." }
+  }
+
+  const parsed = createGroupChatSchema.safeParse(input)
+
+  if (!parsed.success) {
+    return { ok: false, error: "Some details need another look." }
+  }
+
+  const { name, memberIds } = parsed.data
+
+  // `chats.name` is nullable, so a null one slips past the schema; a group needs
+  // a name (the form always supplies one).
+  if (!name) {
+    return { ok: false, error: "Give the group a name." }
+  }
+
+  // Only the user's own bots may join; a forged id matches no row.
+  const owned = await db
+    .select({ id: bots.id })
+    .from(bots)
+    .where(and(eq(bots.userId, userId), inArray(bots.id, memberIds)))
+
+  if (owned.length !== memberIds.length) {
+    return { ok: false, error: "Pick bots that belong to you." }
+  }
+
+  const chatId = nanoid()
+
+  const [[chat]] = await db.batch([
+    db
+      .insert(chats)
+      .values({ id: chatId, userId, kind: "group", name })
+      .returning(),
+    db.insert(chatMembers).values(
+      // Offsetting joinedAt preserves the picked order: the first bot is the
+      // chat's default and leads the stacked avatar.
+      memberIds.map((botId, index) => ({
+        chatId,
+        botId,
+        joinedAt: new Date(Date.now() + index),
+      }))
+    ),
+  ])
+
+  // The sidebar chat list lives in the (dashboard) layout, so revalidate the
+  // layout scope: page scope would leave the sidebar's cached list untouched.
+  revalidatePath("/", "layout")
+
+  return { ok: true, chat }
 }

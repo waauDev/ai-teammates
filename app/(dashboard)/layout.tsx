@@ -3,7 +3,7 @@ import { cookies } from "next/headers"
 
 import { AppSidebar } from "@/components/app-sidebar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
-import { getChatsForUser } from "@/queries/bots"
+import { getBotsForUser, getChatsForUser } from "@/queries/bots"
 
 export default async function DashboardLayout({
   children,
@@ -12,6 +12,7 @@ export default async function DashboardLayout({
 }>) {
   const { userId } = await auth()
   const chats = userId ? await getChatsForUser(userId) : []
+  const bots = userId ? await getBotsForUser(userId) : []
   // SidebarProvider writes this cookie on every toggle; read it so the state
   // survives reloads. No cookie (first visit) keeps the default, expanded.
   const defaultOpen =
@@ -19,7 +20,7 @@ export default async function DashboardLayout({
 
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
-      <AppSidebar chats={chats} />
+      <AppSidebar chats={chats} bots={bots} />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>
   )

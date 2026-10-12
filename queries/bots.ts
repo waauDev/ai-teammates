@@ -9,19 +9,19 @@ export type ChatListItem = {
   kind: "direct" | "group"
   // Direct chats fall back to the bot's name; group chats use their own name.
   title: string
-  // Seed for the bot whose face represents the chat in the sidebar.
-  botAvatar: string
+  // Seeds for every bot in the chat, in join order. A direct chat has one; a
+  // group chat stacks them into a single face in the sidebar.
+  memberAvatars: string[]
   lastMessagePreview: string | null
   lastMessageAtLabel: string
 }
 
 /**
- * The chats that belong to a single Clerk user, each paired with the bot whose
- * face represents it in the sidebar.
+ * The chats that belong to a single Clerk user, each paired with the bots that
+ * are in it.
  *
  * Every chat is scoped to `userId`, so one user can never read another user's
- * chats. Group chats are still represented by the first bot that joined them;
- * a dedicated group avatar/name is deferred for now.
+ * chats.
  */
 export async function getChatsForUser(userId: string): Promise<ChatListItem[]> {
   const rows = await db
@@ -39,15 +39,17 @@ export async function getChatsForUser(userId: string): Promise<ChatListItem[]> {
     .innerJoin(bots, eq(bots.id, chatMembers.botId))
     .where(eq(chats.userId, userId))
     // Newest chats first. Rows of a single chat share a `lastMessageAt`, so the
-    // `joinedAt` tie-break puts the earliest-joined bot first: the "first bot"
-    // fallback used for group chats.
+    // `joinedAt` tie-break keeps each chat's bots in join order.
     .orderBy(desc(chats.lastMessageAt), asc(chatMembers.joinedAt))
 
-  // Keep the first row per chat; it carries the representative bot.
+  // One entry per chat; the first row also carries the chat's own fields.
   const chatsById = new Map<string, ChatListItem>()
 
   for (const row of rows) {
-    if (chatsById.has(row.id)) {
+    const existing = chatsById.get(row.id)
+
+    if (existing) {
+      existing.memberAvatars.push(row.botAvatar)
       continue
     }
 
@@ -55,13 +57,28 @@ export async function getChatsForUser(userId: string): Promise<ChatListItem[]> {
       id: row.id,
       kind: row.kind,
       title: row.name ?? row.botName,
-      botAvatar: row.botAvatar,
+      memberAvatars: [row.botAvatar],
       lastMessagePreview: row.lastMessagePreview,
       lastMessageAtLabel: formatChatTime(row.lastMessageAt),
     })
   }
 
   return [...chatsById.values()]
+}
+
+export type BotOption = {
+  id: string
+  name: string
+  avatar: string
+}
+
+// The user's bots, oldest first, for the group-chat member picker.
+export async function getBotsForUser(userId: string): Promise<BotOption[]> {
+  return db
+    .select({ id: bots.id, name: bots.name, avatar: bots.avatar })
+    .from(bots)
+    .where(eq(bots.userId, userId))
+    .orderBy(asc(bots.createdAt))
 }
 
 // A compact, chat-list friendly stamp: "14:05", "Yesterday", "3 Mar".

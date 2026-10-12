@@ -126,6 +126,23 @@ export type NewChat = typeof chats.$inferInsert
 export type ChatMember = typeof chatMembers.$inferSelect
 export type NewChatMember = typeof chatMembers.$inferInsert
 
+// A group chat is a name plus the bots that join it; both come from the client.
+// `chats.name` stays nullable in the table (direct chats have none), so a null
+// name is rejected by `createGroupChat` rather than by this schema.
+export const createGroupChatSchema = createInsertSchema(chats, {
+  name: (schema) =>
+    schema
+      .trim()
+      .min(1, "Give the group a name.")
+      .max(50, "Keep the name under 50 characters."),
+})
+  .pick({ name: true })
+  .extend({
+    memberIds: z.array(z.string().min(1)).min(2, "Pick at least two bots."),
+  })
+
+export type CreateGroupChatInput = z.infer<typeof createGroupChatSchema>
+
 export const botsRelations = relations(bots, ({ many }) => ({
   memberships: many(chatMembers),
 }))

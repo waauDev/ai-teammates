@@ -24,8 +24,8 @@ export default async function ChatPage({
   return (
     <main className="flex h-svh min-h-0 flex-col overflow-hidden md:h-[calc(100svh-1rem)]">
       <ChatResizableLayout chatId={chatId}>
-        <ChatHeader bot={chat.bot} />
-        <Chat chatId={chatId} />
+        <ChatHeader chat={chat} />
+        <Chat chatId={chatId} kind={chat.kind} members={chat.members} />
       </ChatResizableLayout>
     </main>
   )
