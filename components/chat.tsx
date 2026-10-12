@@ -161,7 +161,7 @@ function ChatView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Conversation>
+      <Conversation className="min-h-0">
         <ConversationContent>
           {messages.length === 0 ? (
             <ConversationEmptyState

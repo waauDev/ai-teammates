@@ -215,6 +215,20 @@ Only JavaScript and the HTTP API have a pre-10 form. The other six cores were
 released in 2026 and never had one, so any older-looking PHP, Python, Rust, Go,
 Dart or C# API attributed to DiceBear is invented rather than outdated.
 
+
+## Deployment
+
+- The app deploys to Railway (project `ai-teammates`, service `ai-teammates`,
+  production environment) and auto-deploys on push to `main`. Env variables for
+  the deployment live in the Railway production environment — use the Railway
+  MCP `set-variables` tool, not `.env.local`.
+- `TRIGGER_SECRET_KEY` on the deployment is a **different key** than the one in
+  `.env.local` (that one is the local dev key `tr_dev_sk_...`). The deployment
+  uses its own production key already set on Railway — do not overwrite it with
+  the dev key.
+- `DAYTONA_API_KEY` / `DAYTONA_API_URL` are the same in dev and prod (values in
+  `.env.local`).
+
 <!-- TRIGGER.DEV SKILLS START -->
 ## Trigger.dev agent skills
 

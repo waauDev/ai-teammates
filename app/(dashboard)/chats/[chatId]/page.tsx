@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 
 import { Chat } from "@/components/chat"
 import { ChatHeader } from "@/components/chat-header"
+import { ChatResizableLayout } from "@/components/chat-resizable-layout"
 import { getChatForUser } from "@/queries/chats"
 
 export default async function ChatPage({
@@ -21,9 +22,11 @@ export default async function ChatPage({
   }
 
   return (
-    <div className="flex h-svh flex-col">
-      <ChatHeader bot={chat.bot} />
-      <Chat chatId={chatId} />
-    </div>
+    <main className="flex h-svh min-h-0 flex-col overflow-hidden md:h-[calc(100svh-1rem)]">
+      <ChatResizableLayout chatId={chatId}>
+        <ChatHeader bot={chat.bot} />
+        <Chat chatId={chatId} />
+      </ChatResizableLayout>
+    </main>
   )
 }
