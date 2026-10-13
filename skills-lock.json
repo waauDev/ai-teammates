@@ -163,6 +163,12 @@
       "skillPath": "skills/neon-postgres/SKILL.md",
       "computedHash": "2e367b4b436500b7d28aba2b4318b1a2a4f7bacd94f1c045ba62751b95b578fe"
     },
+    "sentry-get-started": {
+      "source": "getsentry/sentry-for-ai",
+      "sourceType": "github",
+      "skillPath": "src/skills/sentry-get-started/SKILL.md",
+      "computedHash": "e3346ef71fc7713dcae6ba33317023e98f49fdf9e7d6932bd19d1e63d50dae2e"
+    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",
