@@ -10,6 +10,11 @@ import { BOT_FEATURE, SANDBOX_FEATURE, UPGRADE_MESSAGE } from "@/lib/billing"
 import { db } from "@/lib/db"
 import { createBotSandbox, deleteBotSandbox } from "@/lib/daytona"
 import {
+  MAX_SANDBOXES,
+  releaseSandboxSlot,
+  reserveSandboxSlot,
+} from "@/lib/usage"
+import {
   bots,
   chatMembers,
   chats,
@@ -51,12 +56,20 @@ export async function createBot(
   const botId = nanoid()
   const chatId = nanoid()
 
+  if (!(await reserveSandboxSlot(userId))) {
+    return {
+      ok: false,
+      error: `Your plan allows up to ${MAX_SANDBOXES} active sandboxes. Delete one before creating another.`,
+    }
+  }
+
   // One sandbox per bot; a failure here aborts creation so no bot row exists
   // without its sandbox.
   let sandboxId: string
   try {
     sandboxId = await createBotSandbox(botId)
   } catch (error) {
+    await releaseSandboxSlot(userId)
     console.error("Failed to create Daytona sandbox for bot", error)
     const details =
       error instanceof DaytonaError
@@ -86,12 +99,16 @@ export async function createBot(
         .returning(),
       // A direct chat with the new bot; `name` stays null so the UI falls back to
       // the bot's name.
-      db.insert(chats).values({ id: chatId, userId, kind: "direct" }).returning(),
+      db
+        .insert(chats)
+        .values({ id: chatId, userId, kind: "direct" })
+        .returning(),
       db.insert(chatMembers).values({ chatId, botId }),
     ])
   } catch {
     // Don't leave a billable sandbox behind if the DB write failed.
     await deleteBotSandbox(sandboxId).catch(() => {})
+    await releaseSandboxSlot(userId)
     return { ok: false, error: "Couldn't save the bot." }
   }
 
@@ -174,6 +191,7 @@ export async function deleteBot(id: string): Promise<DeleteBotResult> {
   // every query. shortcut: the chat row itself is left behind, unreachable;
   // delete it too if a chat ever needs to outlive its bots.
   await db.delete(bots).where(and(eq(bots.id, id), eq(bots.userId, userId)))
+  await releaseSandboxSlot(userId)
 
   revalidatePath("/", "layout")
 

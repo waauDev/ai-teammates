@@ -14,6 +14,7 @@ export type ChatBot = {
 
 export type ChatDetail = {
   id: string
+  userId: string
   kind: "direct" | "group"
   name: string | null
   // Every bot in the chat, in join order. A direct chat has exactly one.
@@ -58,6 +59,7 @@ async function loadChat(where: SQL | undefined): Promise<ChatDetail | null> {
   const rows = await db
     .select({
       id: chats.id,
+      userId: chats.userId,
       kind: chats.kind,
       name: chats.name,
       botId: bots.id,
@@ -82,6 +84,7 @@ async function loadChat(where: SQL | undefined): Promise<ChatDetail | null> {
 
   return {
     id: first.id,
+    userId: first.userId,
     kind: first.kind,
     name: first.name,
     members: rows.map((row) => ({

@@ -1,6 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs"
 import { shadcn } from "@clerk/ui/themes"
 import { Geist, Geist_Mono } from "next/font/google"
+import Script from "next/script"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -32,6 +33,9 @@ export default function RootLayout({
       )}
     >
       <body>
+        <Script id="theme-init" strategy="beforeInteractive">
+          {`(()=>{try{const t=localStorage.getItem("theme")||"system";const d=t==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):t;const r=document.documentElement;r.classList.remove("light","dark");r.classList.add(d);r.style.colorScheme=d}catch{}})()`}
+        </Script>
         <ClerkProvider appearance={{ theme: shadcn }}>
           <ThemeProvider>
             <TooltipProvider>{children}</TooltipProvider>

@@ -20,13 +20,17 @@ const sandboxes = new Map<string, Sandbox>()
 export function getBotSandbox(sandboxId: string): Promise<Sandbox> {
   const cached = sandboxes.get(sandboxId)
   if (cached) {
-    return cached.state === "started" ? Promise.resolve(cached) : cached.start().then(() => cached)
+    return cached.state === "started"
+      ? Promise.resolve(cached)
+      : cached.start().then(() => cached)
   }
-  return client().get(sandboxId).then(async (sandbox) => {
-    if (sandbox.state !== "started") await sandbox.start()
-    sandboxes.set(sandboxId, sandbox)
-    return sandbox
-  })
+  return client()
+    .get(sandboxId)
+    .then(async (sandbox) => {
+      if (sandbox.state !== "started") await sandbox.start()
+      sandboxes.set(sandboxId, sandbox)
+      return sandbox
+    })
 }
 
 // The desktop (Xvfb, xfce4, x11vnc) is not running in a fresh sandbox. Start it
@@ -65,12 +69,15 @@ export async function writeSandboxFile(
   )
 
   if (response.exitCode !== 0) {
-    throw new Error(response.result || `Could not write ${path} in the sandbox.`)
+    throw new Error(
+      response.result || `Could not write ${path} in the sandbox.`
+    )
   }
 }
 
 export async function createBotSandbox(botId: string): Promise<string> {
   // Named after the bot so it's findable in the Daytona dashboard.
+  // Daytona's default sandbox allocation is 1 vCPU, 1 GiB RAM, and 3 GiB disk.
   const sandbox = await client().create({ name: `bot-${botId}` })
   try {
     await writeSandboxFile(sandbox, "/home/daytona/MEMORY.md", "\n")

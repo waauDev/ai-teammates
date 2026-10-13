@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm"
 import {
   index,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -120,6 +121,45 @@ export const chatMembers = pgTable(
     index("chat_members_bot_id_idx").on(t.botId),
   ]
 )
+
+// One row per Clerk subscription period. `reservedMicros` prevents parallel
+// turns from spending the same remaining AI budget before provider usage lands.
+export const usagePeriods = pgTable(
+  "usage_periods",
+  {
+    userId: text("user_id").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    aiCostMicros: integer("ai_cost_micros").notNull().default(0),
+    reservedMicros: integer("reserved_micros").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.periodStart] })]
+)
+
+export const usageLedger = pgTable(
+  "usage_ledger",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    costMicros: integer("cost_micros").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("usage_ledger_user_period_idx").on(t.userId, t.periodStart)]
+)
+
+// Sandbox slots are independent of billing renewal: stopped sandboxes still
+// occupy storage and must count toward the user's three-sandbox ceiling.
+export const userSandboxUsage = pgTable("user_sandbox_usage", {
+  userId: text("user_id").primaryKey(),
+  activeSandboxes: integer("active_sandboxes").notNull().default(0),
+})
 
 export type Chat = typeof chats.$inferSelect
 export type NewChat = typeof chats.$inferInsert

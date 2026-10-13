@@ -228,6 +228,9 @@ Dart or C# API attributed to DiceBear is invented rather than outdated.
   the dev key.
 - `DAYTONA_API_KEY` / `DAYTONA_API_URL` are the same in dev and prod (values in
   `.env.local`).
+- The Trigger.dev chat task reads the active Clerk subscription period for usage
+  accounting, so `CLERK_SECRET_KEY` must also be configured in each Trigger.dev
+  environment where the task runs.
 
 <!-- TRIGGER.DEV SKILLS START -->
 ## Trigger.dev agent skills

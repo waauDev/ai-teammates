@@ -1,7 +1,13 @@
 "use client"
 
 import { UserButton } from "@clerk/nextjs"
-import { BotIcon, PlusIcon, SearchIcon, UsersIcon } from "lucide-react"
+import {
+  BotIcon,
+  ChartNoAxesColumnIncreasingIcon,
+  PlusIcon,
+  SearchIcon,
+  UsersIcon,
+} from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
@@ -53,8 +59,9 @@ export function AppSidebar({ chats, bots }: AppSidebarProps) {
   const router = useRouter()
   const pathname = usePathname()
   // Chat route is /chats/{id}; highlight the chat it points at.
-  const activeChatId =
-    pathname.startsWith("/chats/") ? pathname.split("/")[2] : undefined
+  const activeChatId = pathname.startsWith("/chats/")
+    ? pathname.split("/")[2]
+    : undefined
 
   // ⌘K / Ctrl+K opens the search palette, the shadcn CommandDialog shortcut.
   useEffect(() => {
@@ -106,7 +113,7 @@ export function AppSidebar({ chats, bots }: AppSidebarProps) {
           onClick={() => setSearchOpen(true)}
           // Mirrors Input's default classes so the trigger reads as a search
           // field, while keeping the button's own hover state.
-          className="h-8 w-full min-w-0 justify-start rounded-lg border border-input bg-transparent px-2.5 py-1 text-base font-normal text-muted-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2!"
+          className="h-8 w-full min-w-0 justify-start rounded-lg border border-input bg-transparent px-2.5 py-1 text-base font-normal text-muted-foreground transition-colors outline-none group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30"
         >
           <SearchIcon className="opacity-50" />
           <span className="truncate group-data-[collapsible=icon]:hidden">
@@ -185,7 +192,15 @@ export function AppSidebar({ chats, bots }: AppSidebarProps) {
                       avatarBox: "order-first size-6",
                     },
                   }}
-                />
+                >
+                  <UserButton.MenuItems>
+                    <UserButton.Link
+                      label="Usage"
+                      labelIcon={<ChartNoAxesColumnIncreasingIcon />}
+                      href="/usage"
+                    />
+                  </UserButton.MenuItems>
+                </UserButton>
               }
             />
           </SidebarMenuItem>

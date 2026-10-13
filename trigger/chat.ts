@@ -1,11 +1,28 @@
 import { openai } from "@ai-sdk/openai"
 import { DaytonaFileNotFoundError } from "@daytona/sdk"
 import { chat } from "@trigger.dev/sdk/ai"
-import { tool } from "ai"
+import { stepCountIs, tool } from "ai"
 import { z } from "zod"
 
-import { ensureComputerUse, getBotSandbox, writeSandboxFile } from "@/lib/daytona"
-import { getChat, getChatBot, type ChatBot, type ChatDetail } from "@/queries/chats"
+import {
+  ensureComputerUse,
+  getBotSandbox,
+  writeSandboxFile,
+} from "@/lib/daytona"
+import {
+  getSubscriptionPeriod,
+  MAX_MODEL_STEPS,
+  MAX_OUTPUT_TOKENS_PER_STEP,
+  releaseAiReservation,
+  reserveAiUsage,
+  settleAiUsage,
+} from "@/lib/usage"
+import {
+  getChat,
+  getChatBot,
+  type ChatBot,
+  type ChatDetail,
+} from "@/queries/chats"
 
 // The bot the user picked in the composer for this turn. Optional so a direct
 // chat (or an older client) falls back to the chat's first member.
@@ -53,13 +70,55 @@ export const chatAgent = chat.agent({
       messageMetadata: () => ({ botId: bot?.id }),
     })
 
-    return streamText({
+    if (!chatDetail) throw new Error("This chat no longer exists.")
+    const period = await getSubscriptionPeriod(chatDetail.userId)
+    if (!period)
+      throw new Error(
+        "An active subscription is required to use the chat agent."
+      )
+    const system = systemPrompt(bot, chatDetail)
+    const reservation = await reserveAiUsage(
+      chatDetail.userId,
+      period,
+      messages,
+      system
+    )
+    if (!reservation) {
+      throw new Error(
+        "You have reached the $10 AI usage limit for this subscription period."
+      )
+    }
+
+    const result = streamText({
       model: openai("gpt-6-astra"),
       messages,
       tools,
-      system: systemPrompt(bot, chatDetail),
+      system,
       abortSignal: signal,
+      maxOutputTokens: MAX_OUTPUT_TOKENS_PER_STEP,
+      stopWhen: stepCountIs(MAX_MODEL_STEPS),
     })
+    chat.defer(
+      Promise.resolve(result.totalUsage)
+        .then((usage) =>
+          settleAiUsage(
+            chatDetail.userId,
+            period,
+            reservation,
+            usage.inputTokens ?? 0,
+            usage.outputTokens ?? 0
+          )
+        )
+        .catch(async (error: unknown) => {
+          await releaseAiReservation(
+            chatDetail.userId,
+            period.start,
+            reservation
+          )
+          console.error("Could not settle AI usage for chat turn", error)
+        })
+    )
+    return result
   },
 })
 
@@ -71,7 +130,8 @@ function buildSandboxTools(
   let sandboxId: Promise<string> | undefined
   const requireSandboxId = () => {
     sandboxId ??= resolveBot(chatId, botId).then((bot) => {
-      if (!bot?.sandboxId) throw new Error("This bot has no cloud sandbox assigned yet.")
+      if (!bot?.sandboxId)
+        throw new Error("This bot has no cloud sandbox assigned yet.")
       return bot.sandboxId
     })
     return sandboxId
@@ -83,7 +143,9 @@ function buildSandboxTools(
     return getBotSandbox(id)
   }
   const takeScreenshot = async () => {
-    const shot = await (await getDesktopSandbox()).computerUse.screenshot.takeCompressed({
+    const shot = await (
+      await getDesktopSandbox()
+    ).computerUse.screenshot.takeCompressed({
       format: "png",
     })
     return {
@@ -123,19 +185,20 @@ function buildSandboxTools(
         timeout: z.number().int().min(1).max(600).optional(),
       }),
       execute: async ({ command, cwd, timeout }) => {
-        if (/\b(?:chromium(?:-browser)?|google-chrome(?:-stable)?|firefox|xdg-open|sensible-browser)\b/i.test(command)) {
+        if (
+          /\b(?:chromium(?:-browser)?|google-chrome(?:-stable)?|firefox|xdg-open|sensible-browser)\b/i.test(
+            command
+          )
+        ) {
           return {
             exitCode: 126,
             output:
               "Open and control websites with the screen, mouse, and keyboard tools instead of launching a browser from the terminal.",
           }
         }
-        const response = await (await getSandbox()).process.executeCommand(
-          command,
-          cwd,
-          undefined,
-          timeout ?? 60
-        )
+        const response = await (
+          await getSandbox()
+        ).process.executeCommand(command, cwd, undefined, timeout ?? 60)
         return { exitCode: response.exitCode, output: response.result || "" }
       },
     }),
@@ -192,7 +255,8 @@ function buildSandboxTools(
       },
     }),
     mouse_click: tool({
-      description: "Click the mouse at pixel coordinates on the sandbox screen.",
+      description:
+        "Click the mouse at pixel coordinates on the sandbox screen.",
       inputSchema: z.object({
         x: z.number(),
         y: z.number(),
@@ -200,12 +264,20 @@ function buildSandboxTools(
         doubleClick: z.boolean().optional(),
       }),
       execute: async ({ x, y, button, doubleClick }) => {
-        await (await getDesktopSandbox()).computerUse.mouse.click(x, y, button, doubleClick)
-        return { x, y, button: button ?? "left", doubleClick: doubleClick ?? false }
+        await (
+          await getDesktopSandbox()
+        ).computerUse.mouse.click(x, y, button, doubleClick)
+        return {
+          x,
+          y,
+          button: button ?? "left",
+          doubleClick: doubleClick ?? false,
+        }
       },
     }),
     mouse_move: tool({
-      description: "Move the mouse cursor to pixel coordinates on the sandbox screen.",
+      description:
+        "Move the mouse cursor to pixel coordinates on the sandbox screen.",
       inputSchema: z.object({ x: z.number(), y: z.number() }),
       execute: async ({ x, y }) => {
         await (await getDesktopSandbox()).computerUse.mouse.move(x, y)
@@ -221,7 +293,9 @@ function buildSandboxTools(
         amount: z.number().int().min(1).max(20).optional(),
       }),
       execute: async ({ x, y, direction, amount }) => {
-        await (await getDesktopSandbox()).computerUse.mouse.scroll(x, y, direction, amount ?? 1)
+        await (
+          await getDesktopSandbox()
+        ).computerUse.mouse.scroll(x, y, direction, amount ?? 1)
         return { x, y, direction, amount: amount ?? 1 }
       },
     }),
@@ -234,13 +308,16 @@ function buildSandboxTools(
       },
     }),
     keyboard_press: tool({
-      description: "Press a key, optionally with modifier keys, on the sandbox keyboard.",
+      description:
+        "Press a key, optionally with modifier keys, on the sandbox keyboard.",
       inputSchema: z.object({
         key: z.string().min(1),
         modifiers: z.array(z.enum(["ctrl", "alt", "shift", "cmd"])).optional(),
       }),
       execute: async ({ key, modifiers }) => {
-        await (await getDesktopSandbox()).computerUse.keyboard.press(key, modifiers)
+        await (
+          await getDesktopSandbox()
+        ).computerUse.keyboard.press(key, modifiers)
         return { key, modifiers: modifiers ?? [] }
       },
     }),
@@ -270,7 +347,9 @@ function buildSandboxTools(
               const sandbox = await getSandbox()
               let memory: string
               try {
-                memory = (await sandbox.fs.downloadFile("/home/daytona/MEMORY.md")).toString("utf8")
+                memory = (
+                  await sandbox.fs.downloadFile("/home/daytona/MEMORY.md")
+                ).toString("utf8")
               } catch (error) {
                 if (!(error instanceof DaytonaFileNotFoundError)) throw error
                 memory = ""
@@ -280,13 +359,19 @@ function buildSandboxTools(
               if (
                 memory
                   .split(/\r?\n/)
-                  .some((line) => line.trim().toLowerCase() === note.toLowerCase())
+                  .some(
+                    (line) => line.trim().toLowerCase() === note.toLowerCase()
+                  )
               ) {
                 return { saved: false, reason: "This memory is already saved." }
               }
 
               const updatedMemory = `${memory.trimEnd()}${memory.trim() ? "\n" : ""}${note}\n`
-              await writeSandboxFile(sandbox, "/home/daytona/MEMORY.md", updatedMemory)
+              await writeSandboxFile(
+                sandbox,
+                "/home/daytona/MEMORY.md",
+                updatedMemory
+              )
               return { saved: true, path: "/home/daytona/MEMORY.md" }
             },
           }),
