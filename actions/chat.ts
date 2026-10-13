@@ -1,6 +1,7 @@
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
+import * as Sentry from "@sentry/nextjs"
 import { auth as triggerAuth } from "@trigger.dev/sdk"
 import {
   chat,
@@ -43,6 +44,10 @@ export async function startChatSession(params: ChatStartSessionParams<typeof cha
   const { userId, has } = await auth()
   await assertOwnsChat(userId, params.chatId)
   if (!has({ feature: BOT_FEATURE })) throw new Error(UPGRADE_MESSAGE)
+  Sentry.logger.info("chat session started", {
+    chat_id: params.chatId,
+    user_id: userId,
+  })
   return startSession(params)
 }
 
@@ -145,6 +150,12 @@ export async function createGroupChat(
   // layout scope: page scope would leave the sidebar's cached list untouched.
   revalidatePath("/", "layout")
 
+  Sentry.logger.info("group chat created", {
+    chat_id: chat.id,
+    user_id: userId,
+    member_count: memberIds.length,
+  })
+
   return { ok: true, chat }
 }
 
@@ -205,6 +216,12 @@ export async function updateGroupChat(
   // The sidebar chat list and the chat header both live in the layout scope.
   revalidatePath("/", "layout")
 
+  Sentry.logger.info("group chat updated", {
+    chat_id: id,
+    user_id: userId,
+    member_count: memberIds.length,
+  })
+
   return { ok: true }
 }
 
@@ -234,6 +251,8 @@ export async function deleteGroupChat(
   }
 
   revalidatePath("/", "layout")
+
+  Sentry.logger.info("group chat deleted", { chat_id: id, user_id: userId })
 
   return { ok: true }
 }

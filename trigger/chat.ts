@@ -1,5 +1,6 @@
 import { openai } from "@ai-sdk/openai"
 import { DaytonaFileNotFoundError } from "@daytona/sdk"
+import * as Sentry from "@sentry/node"
 import { chat } from "@trigger.dev/sdk/ai"
 import { stepCountIs, tool } from "ai"
 import { z } from "zod"
@@ -84,6 +85,11 @@ export const chatAgent = chat.agent({
       system
     )
     if (!reservation) {
+      Sentry.logger.warn("ai budget exhausted", {
+        user_id: chatDetail.userId,
+        chat_id: chatId,
+        period_start: period.start.toISOString(),
+      })
       throw new Error(
         "You have reached the $10 AI usage limit for this subscription period."
       )
@@ -109,13 +115,17 @@ export const chatAgent = chat.agent({
             usage.outputTokens ?? 0
           )
         )
-        .catch(async (error: unknown) => {
+        .catch(async () => {
           await releaseAiReservation(
             chatDetail.userId,
             period.start,
             reservation
           )
-          console.error("Could not settle AI usage for chat turn", error)
+          Sentry.logger.error("ai usage settlement failed", {
+            user_id: chatDetail.userId,
+            chat_id: chatId,
+            period_start: period.start.toISOString(),
+          })
         })
     )
     return result
@@ -407,6 +417,11 @@ function buildHandoffTool(chatDetail: ChatDetail, currentBotId?: string) {
             error: `There is no teammate with id "${botId}". Teammates: ${choices}.`,
           }
         }
+        Sentry.logger.info("group turn handed off", {
+          chat_id: chatDetail.id,
+          to_bot_id: target.id,
+          ...(currentBotId ? { from_bot_id: currentBotId } : {}),
+        })
         return { handedOff: true, botId: target.id, name: target.name }
       },
     }),

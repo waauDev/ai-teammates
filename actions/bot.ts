@@ -2,6 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { DaytonaError } from "@daytona/sdk"
+import * as Sentry from "@sentry/nextjs"
 import { and, eq } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import { revalidatePath } from "next/cache"
@@ -41,6 +42,10 @@ export async function createBot(
   // A bot comes with its sandbox, so creating one needs both capabilities. The
   // dialog also blocks this client-side; this is the trust boundary.
   if (!has({ feature: BOT_FEATURE }) || !has({ feature: SANDBOX_FEATURE })) {
+    Sentry.logger.info("bot creation blocked", {
+      user_id: userId,
+      reason: "upgrade_required",
+    })
     return { ok: false, error: UPGRADE_MESSAGE }
   }
 
@@ -57,6 +62,11 @@ export async function createBot(
   const chatId = nanoid()
 
   if (!(await reserveSandboxSlot(userId))) {
+    Sentry.logger.info("bot creation blocked", {
+      user_id: userId,
+      reason: "sandbox_limit",
+      limit: MAX_SANDBOXES,
+    })
     return {
       ok: false,
       error: `Your plan allows up to ${MAX_SANDBOXES} active sandboxes. Delete one before creating another.`,
@@ -70,7 +80,6 @@ export async function createBot(
     sandboxId = await createBotSandbox(botId)
   } catch (error) {
     await releaseSandboxSlot(userId)
-    console.error("Failed to create Daytona sandbox for bot", error)
     const details =
       error instanceof DaytonaError
         ? [
@@ -83,6 +92,11 @@ export async function createBot(
         : error instanceof Error
           ? error.message
           : "Unknown Daytona error"
+    Sentry.logger.error("bot sandbox creation failed", {
+      bot_id: botId,
+      user_id: userId,
+      reason: details,
+    })
     return {
       ok: false,
       error: `Couldn't create the bot's sandbox. ${details}`,
@@ -109,12 +123,23 @@ export async function createBot(
     // Don't leave a billable sandbox behind if the DB write failed.
     await deleteBotSandbox(sandboxId).catch(() => {})
     await releaseSandboxSlot(userId)
+    Sentry.logger.error("bot save failed", {
+      bot_id: botId,
+      user_id: userId,
+    })
     return { ok: false, error: "Couldn't save the bot." }
   }
 
   // The sidebar chat list lives in the (dashboard) layout, so revalidate the
   // layout scope: page scope would leave the sidebar's cached list untouched.
   revalidatePath("/", "layout")
+
+  Sentry.logger.info("bot created", {
+    bot_id: bot.id,
+    chat_id: chat.id,
+    sandbox_id: sandboxId,
+    user_id: userId,
+  })
 
   return { ok: true, bot, chat }
 }
@@ -155,6 +180,8 @@ export async function updateBot(
   // The bot's name shows up in the sidebar chat list and the chat header.
   revalidatePath("/", "layout")
 
+  Sentry.logger.info("bot updated", { bot_id: bot.id, user_id: userId })
+
   return { ok: true, bot }
 }
 
@@ -183,6 +210,11 @@ export async function deleteBot(id: string): Promise<DeleteBotResult> {
     try {
       await deleteBotSandbox(bot.sandboxId)
     } catch {
+      Sentry.logger.warn("bot sandbox deletion failed", {
+        bot_id: id,
+        user_id: userId,
+        sandbox_id: bot.sandboxId,
+      })
       return { ok: false, error: "Couldn't remove the bot's sandbox." }
     }
   }
@@ -194,6 +226,8 @@ export async function deleteBot(id: string): Promise<DeleteBotResult> {
   await releaseSandboxSlot(userId)
 
   revalidatePath("/", "layout")
+
+  Sentry.logger.info("bot deleted", { bot_id: id, user_id: userId })
 
   return { ok: true }
 }
