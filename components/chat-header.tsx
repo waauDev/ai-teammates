@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@clerk/nextjs"
 import { MonitorIcon } from "lucide-react"
 
 import { BotDialog } from "@/components/bot-dialog"
@@ -8,6 +9,8 @@ import { useDesktopPanelToggle } from "@/components/chat-resizable-layout"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { GroupChatDialog } from "@/components/group-chat-dialog"
 import { Button } from "@/components/ui/button"
+import { useUpgradeToast } from "@/components/upgrade-toast"
+import { SANDBOX_FEATURE } from "@/lib/billing"
 import type { BotOption } from "@/queries/bots"
 import type { ChatDetail } from "@/queries/chats"
 
@@ -19,6 +22,8 @@ type ChatHeaderProps = {
 
 function ChatHeader({ chat, bots }: ChatHeaderProps) {
   const { toggleDesktop, desktopOpen } = useDesktopPanelToggle()
+  const { has } = useAuth()
+  const showUpgradeToast = useUpgradeToast()
   const isGroup = chat.kind === "group"
 
   return (
@@ -62,7 +67,14 @@ function ChatHeader({ chat, bots }: ChatHeaderProps) {
           aria-label="Toggle desktop panel"
           aria-controls="desktop"
           aria-expanded={desktopOpen}
-          onClick={toggleDesktop}
+          onClick={() => {
+            // Connecting to the sandbox desktop is its own billable capability.
+            if (!has({ feature: SANDBOX_FEATURE })) {
+              showUpgradeToast()
+              return
+            }
+            toggleDesktop()
+          }}
         >
           <MonitorIcon data-icon="inline-start" />
           Desktop

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
 import { useChat } from "@ai-sdk/react"
 import { useLoadTranscript, useTriggerChatTransport } from "@trigger.dev/sdk/chat/react"
 import type { TriggerChatTransport } from "@trigger.dev/sdk/chat"
@@ -10,6 +11,7 @@ import { isToolUIPart, type UIMessage } from "ai"
 import { loadChatTranscript, mintChatAccessToken, startChatSession } from "@/actions/chat"
 import type { chatAgent } from "@/trigger/chat"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { useUpgradeToast } from "@/components/upgrade-toast"
 import { Badge } from "@/components/ui/badge"
 import {
   Conversation,
@@ -44,6 +46,7 @@ import {
   PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
+import { BOT_FEATURE } from "@/lib/billing"
 import type { ChatBot } from "@/queries/chats"
 
 function ShowScreenOutput({ output }: { output: unknown }) {
@@ -218,6 +221,8 @@ function ChatView({
     transport,
     resume: initialMessages.length > 0,
   })
+  const { has } = useAuth()
+  const showUpgradeToast = useUpgradeToast()
   const [handoffNotices, setHandoffNotices] = useState<
     { userMessageId: string; botId: string }[]
   >([])
@@ -269,6 +274,10 @@ function ChatView({
   function handleSubmit(message: PromptInputMessage) {
     const text = message.text.trim()
     if (!text) return
+    if (!has({ feature: BOT_FEATURE })) {
+      showUpgradeToast()
+      return
+    }
     // In a group chat, record which bot the prompt was addressed to so the
     // message can show its tag. The agent still picks the bot from clientData.
     sendMessage({

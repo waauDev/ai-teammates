@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import { revalidatePath } from "next/cache"
 
+import { BOT_FEATURE, SANDBOX_FEATURE, UPGRADE_MESSAGE } from "@/lib/billing"
 import { db } from "@/lib/db"
 import { createBotSandbox, deleteBotSandbox } from "@/lib/daytona"
 import {
@@ -26,10 +27,16 @@ export type CreateBotResult =
 export async function createBot(
   input: CreateBotInput
 ): Promise<CreateBotResult> {
-  const { userId } = await auth()
+  const { userId, has } = await auth()
 
   if (!userId) {
     return { ok: false, error: "You must be signed in to create a bot." }
+  }
+
+  // A bot comes with its sandbox, so creating one needs both capabilities. The
+  // dialog also blocks this client-side; this is the trust boundary.
+  if (!has({ feature: BOT_FEATURE }) || !has({ feature: SANDBOX_FEATURE })) {
+    return { ok: false, error: UPGRADE_MESSAGE }
   }
 
   const parsed = createBotSchema.safeParse(input)

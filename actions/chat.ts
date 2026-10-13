@@ -11,6 +11,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import { revalidatePath } from "next/cache"
 
+import { BOT_FEATURE, SANDBOX_FEATURE, UPGRADE_MESSAGE } from "@/lib/billing"
 import { db } from "@/lib/db"
 import {
   bots,
@@ -39,13 +40,17 @@ async function assertOwnsChat(userId: string | null, chatId: string) {
 // Creates the session + first run and returns a session-scoped token.
 // Idempotent on (environment, chatId).
 export async function startChatSession(params: ChatStartSessionParams<typeof chatAgent>) {
-  await assertOwnsChat((await auth()).userId, params.chatId)
+  const { userId, has } = await auth()
+  await assertOwnsChat(userId, params.chatId)
+  if (!has({ feature: BOT_FEATURE })) throw new Error(UPGRADE_MESSAGE)
   return startSession(params)
 }
 
 // Pure mint. The transport calls this on a 401/403 to refresh an expired token.
 export async function mintChatAccessToken(chatId: string) {
-  await assertOwnsChat((await auth()).userId, chatId)
+  const { userId, has } = await auth()
+  await assertOwnsChat(userId, chatId)
+  if (!has({ feature: BOT_FEATURE })) throw new Error(UPGRADE_MESSAGE)
   return triggerAuth.createPublicToken({
     scopes: { read: { sessions: chatId }, write: { sessions: chatId } },
     expirationTime: "1h",
@@ -59,8 +64,9 @@ export async function loadChatTranscript(params: { chatId: string; limit?: numbe
 }
 
 export async function getChatVncPreviewUrl(chatId: string) {
-  const { userId } = await auth()
+  const { userId, has } = await auth()
   if (!userId) throw new Error("Unauthorized")
+  if (!has({ feature: SANDBOX_FEATURE })) throw new Error(UPGRADE_MESSAGE)
 
   const chat = await getChatForUser(userId, chatId)
   if (!chat) throw new Error("Unauthorized")

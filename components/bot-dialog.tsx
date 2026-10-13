@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@clerk/nextjs"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { PlusIcon, ShuffleIcon } from "lucide-react"
 import { nanoid } from "nanoid"
@@ -11,6 +12,7 @@ import { z } from "zod"
 
 import { createBot, deleteBot, updateBot } from "@/actions/bot"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { useUpgradeToast } from "@/components/upgrade-toast"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,6 +46,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { BOT_FEATURE, SANDBOX_FEATURE } from "@/lib/billing"
 import type { ChatBot } from "@/queries/chats"
 
 const botFormSchema = z.object({
@@ -127,6 +130,8 @@ function BotDialog({
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const router = useRouter()
+  const { has } = useAuth()
+  const showUpgradeToast = useUpgradeToast()
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
   const [serverError, setServerError] = useState<string | null>(null)
@@ -166,6 +171,15 @@ function BotDialog({
 
   function onSubmit(values: BotFormValues) {
     setServerError(null)
+
+    // Creating a bot creates its sandbox too, so the free plan can do neither.
+    if (
+      !bot &&
+      !(has({ feature: BOT_FEATURE }) && has({ feature: SANDBOX_FEATURE }))
+    ) {
+      showUpgradeToast()
+      return
+    }
 
     startTransition(async () => {
       const result = await (bot
