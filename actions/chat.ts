@@ -17,8 +17,10 @@ import {
   chatMembers,
   chats,
   createGroupChatSchema,
+  updateGroupChatSchema,
   type Chat,
   type CreateGroupChatInput,
+  type UpdateGroupChatInput,
 } from "@/lib/db/schema"
 import { ensureComputerUse, getBotSandbox } from "@/lib/daytona"
 import { getChatForUser } from "@/queries/chats"
@@ -138,4 +140,94 @@ export async function createGroupChat(
   revalidatePath("/", "layout")
 
   return { ok: true, chat }
+}
+
+export type UpdateGroupChatResult = { ok: true } | { ok: false; error: string }
+
+export async function updateGroupChat(
+  input: UpdateGroupChatInput
+): Promise<UpdateGroupChatResult> {
+  const { userId } = await auth()
+
+  if (!userId) {
+    return { ok: false, error: "You must be signed in to edit a group chat." }
+  }
+
+  const parsed = updateGroupChatSchema.safeParse(input)
+
+  if (!parsed.success) {
+    return { ok: false, error: "Some details need another look." }
+  }
+
+  const { id, name, memberIds } = parsed.data
+
+  // Scoping the lookup to `userId` keeps a forged id off another user's chat;
+  // the `kind` check keeps this action off a direct chat.
+  const chat = await getChatForUser(userId, id)
+
+  if (!chat || chat.kind !== "group") {
+    return { ok: false, error: "That group chat no longer exists." }
+  }
+
+  // Only the user's own bots may join; a forged id matches no row.
+  const owned = await db
+    .select({ id: bots.id })
+    .from(bots)
+    .where(and(eq(bots.userId, userId), inArray(bots.id, memberIds)))
+
+  if (owned.length !== memberIds.length) {
+    return { ok: false, error: "Pick bots that belong to you." }
+  }
+
+  await db.batch([
+    db
+      .update(chats)
+      .set({ name })
+      .where(and(eq(chats.id, id), eq(chats.userId, userId))),
+    // Replace the roster wholesale: the picked order becomes the new join
+    // order, so the first bot stays the chat's default.
+    db.delete(chatMembers).where(eq(chatMembers.chatId, id)),
+    db.insert(chatMembers).values(
+      memberIds.map((botId, index) => ({
+        chatId: id,
+        botId,
+        joinedAt: new Date(Date.now() + index),
+      }))
+    ),
+  ])
+
+  // The sidebar chat list and the chat header both live in the layout scope.
+  revalidatePath("/", "layout")
+
+  return { ok: true }
+}
+
+export type DeleteGroupChatResult = { ok: true } | { ok: false; error: string }
+
+export async function deleteGroupChat(
+  id: string
+): Promise<DeleteGroupChatResult> {
+  const { userId } = await auth()
+
+  if (!userId) {
+    return { ok: false, error: "You must be signed in to delete a group chat." }
+  }
+
+  // Deleting the chat cascades its memberships. shortcut: the Trigger.dev
+  // session and transcript are left behind, unreachable; delete them too if a
+  // group chat ever needs a clean teardown.
+  const [chat] = await db
+    .delete(chats)
+    .where(
+      and(eq(chats.id, id), eq(chats.userId, userId), eq(chats.kind, "group"))
+    )
+    .returning()
+
+  if (!chat) {
+    return { ok: false, error: "That group chat no longer exists." }
+  }
+
+  revalidatePath("/", "layout")
+
+  return { ok: true }
 }

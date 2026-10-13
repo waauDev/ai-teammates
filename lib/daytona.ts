@@ -53,9 +53,31 @@ export function ensureComputerUse(sandboxId: string): Promise<void> {
   return ready
 }
 
+export async function writeSandboxFile(
+  sandbox: Sandbox,
+  path: string,
+  content: string
+): Promise<void> {
+  const encodedPath = Buffer.from(path, "utf8").toString("base64")
+  const encodedContent = Buffer.from(content, "utf8").toString("base64")
+  const response = await sandbox.process.executeCommand(
+    `python3 -c "import base64,pathlib,sys; p=pathlib.Path(base64.b64decode(sys.argv[1]).decode()); p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(base64.b64decode(sys.argv[2]))" '${encodedPath}' '${encodedContent}'`
+  )
+
+  if (response.exitCode !== 0) {
+    throw new Error(response.result || `Could not write ${path} in the sandbox.`)
+  }
+}
+
 export async function createBotSandbox(botId: string): Promise<string> {
   // Named after the bot so it's findable in the Daytona dashboard.
   const sandbox = await client().create({ name: `bot-${botId}` })
+  try {
+    await writeSandboxFile(sandbox, "/home/daytona/MEMORY.md", "\n")
+  } catch (error) {
+    await sandbox.delete(undefined, true).catch(() => {})
+    throw error
+  }
   return sandbox.id
 }
 

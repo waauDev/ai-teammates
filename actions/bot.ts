@@ -1,6 +1,7 @@
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
+import { DaytonaError } from "@daytona/sdk"
 import { and, eq } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import { revalidatePath } from "next/cache"
@@ -48,8 +49,24 @@ export async function createBot(
   let sandboxId: string
   try {
     sandboxId = await createBotSandbox(botId)
-  } catch {
-    return { ok: false, error: "Couldn't create the bot's sandbox." }
+  } catch (error) {
+    console.error("Failed to create Daytona sandbox for bot", error)
+    const details =
+      error instanceof DaytonaError
+        ? [
+            error.statusCode ? `HTTP ${error.statusCode}` : undefined,
+            error.code,
+            error.message,
+          ]
+            .filter(Boolean)
+            .join(": ")
+        : error instanceof Error
+          ? error.message
+          : "Unknown Daytona error"
+    return {
+      ok: false,
+      error: `Couldn't create the bot's sandbox. ${details}`,
+    }
   }
 
   let bot: Bot

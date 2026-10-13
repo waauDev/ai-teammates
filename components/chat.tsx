@@ -153,6 +153,11 @@ function Chat({
   // In a group chat the reply comes from the picked bot; direct chats have one.
   const [botId, setBotId] = useState(members[0]?.id ?? "")
 
+  // Editing the roster can remove the picked bot; fall back to the first.
+  const activeBotId = members.some((member) => member.id === botId)
+    ? botId
+    : (members[0]?.id ?? "")
+
   const transport = useTriggerChatTransport<typeof chatAgent>({
     task: "chat",
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
@@ -160,7 +165,7 @@ function Chat({
       startChatSession({ chatId, clientData }),
     // The transport threads this into every turn's metadata; the agent reads it
     // to pick which bot answers.
-    clientData: { botId },
+    clientData: { botId: activeBotId },
   })
 
   const { messages, isLoading } = useLoadTranscript(chatId, loadChatTranscript, {
@@ -182,7 +187,7 @@ function Chat({
       chatId={chatId}
       kind={kind}
       members={members}
-      botId={botId}
+      botId={activeBotId}
       onBotIdChange={setBotId}
       transport={transport}
       initialMessages={messages}

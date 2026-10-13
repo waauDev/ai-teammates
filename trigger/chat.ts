@@ -1,9 +1,10 @@
 import { openai } from "@ai-sdk/openai"
+import { DaytonaFileNotFoundError } from "@daytona/sdk"
 import { chat } from "@trigger.dev/sdk/ai"
 import { tool } from "ai"
 import { z } from "zod"
 
-import { ensureComputerUse, getBotSandbox } from "@/lib/daytona"
+import { ensureComputerUse, getBotSandbox, writeSandboxFile } from "@/lib/daytona"
 import { getChat, getChatBot, type ChatBot, type ChatDetail } from "@/queries/chats"
 
 // The bot the user picked in the composer for this turn. Optional so a direct
@@ -27,7 +28,11 @@ export const chatAgent = chat.agent({
         (member) => member.id === event.clientData?.botId
       ) ?? chatDetail?.members[0]
     return {
-      ...buildSandboxTools(event.chatId, event.clientData?.botId),
+      ...buildSandboxTools(
+        event.chatId,
+        event.clientData?.botId,
+        chatDetail?.kind === "direct"
+      ),
       // A direct chat has one bot, so handoff only exists in groups. The tool
       // must be declared here (not merged into `run`'s streamText), because the
       // agent converts persisted history against this resolved set.
@@ -58,7 +63,11 @@ export const chatAgent = chat.agent({
   },
 })
 
-function buildSandboxTools(chatId: string, botId?: string) {
+function buildSandboxTools(
+  chatId: string,
+  botId?: string,
+  allowMemoryWrite = false
+) {
   let sandboxId: Promise<string> | undefined
   const requireSandboxId = () => {
     sandboxId ??= resolveBot(chatId, botId).then((bot) => {
@@ -134,7 +143,21 @@ function buildSandboxTools(chatId: string, botId?: string) {
       description: "Read a file from this bot's sandbox.",
       inputSchema: z.object({ path: z.string().min(1) }),
       execute: async ({ path }) => {
-        const buffer = await (await getSandbox()).fs.downloadFile(path)
+        const sandbox = await getSandbox()
+        let buffer: Buffer
+        try {
+          buffer = await sandbox.fs.downloadFile(path)
+        } catch (error) {
+          if (
+            !(error instanceof DaytonaFileNotFoundError) ||
+            path !== "/home/daytona/MEMORY.md"
+          ) {
+            throw error
+          }
+
+          await writeSandboxFile(sandbox, path, "\n")
+          buffer = Buffer.from("\n")
+        }
         if (buffer.includes(0)) {
           return { path, binary: true, sizeBytes: buffer.length }
         }
@@ -151,7 +174,7 @@ function buildSandboxTools(chatId: string, botId?: string) {
       description: "Create or overwrite a text file in this bot's sandbox.",
       inputSchema: z.object({ path: z.string().min(1), content: z.string() }),
       execute: async ({ path, content }) => {
-        await (await getSandbox()).fs.uploadFile(Buffer.from(content, "utf8"), path)
+        await writeSandboxFile(await getSandbox(), path, content)
         return { path, writtenBytes: Buffer.byteLength(content, "utf8") }
       },
     }),
@@ -235,6 +258,40 @@ function buildSandboxTools(chatId: string, botId?: string) {
       execute: takeScreenshot,
       toModelOutput: screenshotToModel,
     }),
+    ...(allowMemoryWrite
+      ? {
+          remember: tool({
+            description:
+              "Save a stable, non-sensitive personal fact the user shared in this private chat to MEMORY.md for future conversations. Add it without deleting existing memories. Do not save credentials, secrets, or sensitive data.",
+            inputSchema: z.object({
+              fact: z.string().trim().min(1).max(500),
+            }),
+            execute: async ({ fact }) => {
+              const sandbox = await getSandbox()
+              let memory: string
+              try {
+                memory = (await sandbox.fs.downloadFile("/home/daytona/MEMORY.md")).toString("utf8")
+              } catch (error) {
+                if (!(error instanceof DaytonaFileNotFoundError)) throw error
+                memory = ""
+              }
+
+              const note = `- ${fact.trim()}`
+              if (
+                memory
+                  .split(/\r?\n/)
+                  .some((line) => line.trim().toLowerCase() === note.toLowerCase())
+              ) {
+                return { saved: false, reason: "This memory is already saved." }
+              }
+
+              const updatedMemory = `${memory.trimEnd()}${memory.trim() ? "\n" : ""}${note}\n`
+              await writeSandboxFile(sandbox, "/home/daytona/MEMORY.md", updatedMemory)
+              return { saved: true, path: "/home/daytona/MEMORY.md" }
+            },
+          }),
+        }
+      : {}),
   }
 }
 
@@ -294,6 +351,8 @@ function systemPrompt(
     "Usa el terminal y los archivos para tareas de sistema. Para sitios web o aplicaciones gráficas, inspecciona la pantalla, interactúa con el ratón y el teclado, y vuelve a revisarla después de cada cambio importante. No abras navegadores mediante bash.",
     "Mantén los comandos y cambios de archivos dentro del sandbox asignado.",
     "Si el usuario pide una captura o quiere ver qué aparece en pantalla, usa show_screen para mostrarla en el chat. Reserva view_screen para inspección interna; su resultado no se muestra al usuario.",
+    "Tu memoria persistente está en /home/daytona/MEMORY.md dentro de tu sandbox. Cuando una petición dependa de preferencias, decisiones o contexto previo del usuario, léela con read_file antes de responder.",
+    "En chats privados 1:1, cuando el usuario comparta un dato personal estable que pueda ser útil en otra conversación —sobre sí mismo, sus mascotas, familia, preferencias o proyectos— debes guardarlo en MEMORY.md antes de responder usando remember. Por ejemplo, si dice 'mi perro se llama Xia', guarda 'El perro del usuario se llama Xia'. La herramienta agrega el dato y conserva los recuerdos anteriores. No guardes cada mensaje, credenciales, secretos ni datos sensibles.",
   ]
 
   if (chatDetail?.kind === "group") {
@@ -306,6 +365,7 @@ function systemPrompt(
     )
     lines.push(
       "Las herramientas de terminal y pantalla solo operan en tu propio sandbox.",
+      "En chats grupales, consulta tu MEMORY.md cuando la petición dependa de algo que el usuario contó en una conversación privada. Usa solo el dato pertinente y no reveles secretos ni detalles sensibles. Cada compañero tiene su propia memoria; si otro compañero puede conocer mejor ese contexto privado, deriva la petición con handoff.",
       "Usa handoff solo cuando otro compañero este mejor preparado; el destino se elige por botId. Tras derivar, no respondas al usuario. El companero recibira la peticion original."
     )
     if (teammates.length > 0) {
@@ -316,6 +376,10 @@ function systemPrompt(
         "Si otro compañero esta mejor preparado, llama a handoff con su botId exacto y no respondas tu. El compañero recibira la peticion original y continuara la conversacion."
       )
     }
+  } else if (chatDetail?.kind === "direct") {
+    lines.push(
+      "Estás en un chat privado 1:1 con el usuario. Conserva en MEMORY.md los datos estables y no sensibles que el usuario comparta y que puedan ayudar en conversaciones futuras."
+    )
   }
 
   return lines.join("\n")

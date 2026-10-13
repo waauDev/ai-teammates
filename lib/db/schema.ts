@@ -143,6 +143,14 @@ export const createGroupChatSchema = createInsertSchema(chats, {
 
 export type CreateGroupChatInput = z.infer<typeof createGroupChatSchema>
 
+// The same fields as create, plus the chat id, so an update can't touch a
+// column a client isn't allowed to set.
+export const updateGroupChatSchema = createGroupChatSchema.extend({
+  id: z.string().min(1, "Missing group chat id."),
+})
+
+export type UpdateGroupChatInput = z.infer<typeof updateGroupChatSchema>
+
 export const botsRelations = relations(bots, ({ many }) => ({
   memberships: many(chatMembers),
 }))

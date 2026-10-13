@@ -6,27 +6,38 @@ import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { useDesktopPanelToggle } from "@/components/chat-resizable-layout"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
+import { GroupChatDialog } from "@/components/group-chat-dialog"
 import { Button } from "@/components/ui/button"
+import type { BotOption } from "@/queries/bots"
 import type { ChatDetail } from "@/queries/chats"
 
 type ChatHeaderProps = {
   chat: ChatDetail
+  // The user's bots, for the group chat's add/remove member picker.
+  bots: BotOption[]
 }
 
-function ChatHeader({ chat }: ChatHeaderProps) {
+function ChatHeader({ chat, bots }: ChatHeaderProps) {
   const { toggleDesktop, desktopOpen } = useDesktopPanelToggle()
   const isGroup = chat.kind === "group"
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
       {isGroup ? (
-        <div className="flex min-w-0 items-center gap-3 py-1.5 ps-1.5">
+        // The group's identity doubles as the trigger for its edit dialog.
+        <GroupChatDialog
+          bots={bots}
+          chat={chat}
+          trigger={
+            <Button variant="ghost" className="h-auto gap-3 py-1.5 ps-1.5" />
+          }
+        >
           <GroupChatAvatar
             avatars={chat.members.map((member) => member.avatar)}
             className="size-8 shrink-0 rounded-lg"
           />
           <span className="truncate font-medium">{chat.name ?? "Group chat"}</span>
-        </div>
+        </GroupChatDialog>
       ) : (
         // The bot's identity doubles as the trigger for its edit dialog.
         <BotDialog
