@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, type SQL } from "drizzle-orm"
 
 import { db } from "@/lib/db"
 import { bots, chatMembers, chats } from "@/lib/db/schema"
@@ -52,16 +52,9 @@ export async function getChatBot(
   return row ?? null
 }
 
-/**
- * A single chat, scoped to the Clerk user that owns it.
- *
- * `userId` is part of the lookup rather than a post-filter, so a signed-in user
- * can never load someone else's chat by guessing its id.
- */
-export async function getChatForUser(
-  userId: string,
-  chatId: string
-): Promise<ChatDetail | null> {
+// Shared by the user-scoped lookup and the agent's per-run lookup. The caller
+// supplies the filter because the agent has no Clerk user id.
+async function loadChat(where: SQL | undefined): Promise<ChatDetail | null> {
   const rows = await db
     .select({
       id: chats.id,
@@ -77,7 +70,7 @@ export async function getChatForUser(
     .from(chats)
     .innerJoin(chatMembers, eq(chatMembers.chatId, chats.id))
     .innerJoin(bots, eq(bots.id, chatMembers.botId))
-    .where(and(eq(chats.id, chatId), eq(chats.userId, userId)))
+    .where(where)
     // Join order; the first member is the chat's default bot.
     .orderBy(asc(chatMembers.joinedAt))
 
@@ -100,4 +93,20 @@ export async function getChatForUser(
       sandboxId: row.botSandboxId,
     })),
   }
+}
+
+/**
+ * A single chat, scoped to the Clerk user that owns it.
+ *
+ * `userId` is part of the lookup rather than a post-filter, so a signed-in user
+ * can never load someone else's chat by guessing its id.
+ */
+export function getChatForUser(userId: string, chatId: string) {
+  return loadChat(and(eq(chats.id, chatId), eq(chats.userId, userId)))
+}
+
+// The chat a run is answering in, by id alone: the agent has no user id and
+// needs the member list to build the group prompt and the handoff tool.
+export function getChat(chatId: string) {
+  return loadChat(eq(chats.id, chatId))
 }

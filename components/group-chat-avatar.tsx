@@ -18,18 +18,18 @@ function GroupChatAvatar({ avatars, className }: GroupChatAvatarProps) {
   }
 
   const frame = cn("relative shrink-0 @container", className)
-  const face = "absolute rounded-full ring-2 ring-background"
+  const face = "absolute rounded-full ring-2 ring-sidebar"
 
   if (avatars.length === 2) {
     return (
       <div className={frame}>
         <ChatAvatar
           seed={avatars[0]}
-          className={cn(face, "top-[18%] left-0 size-[64%]")}
+          className={cn(face, "top-0 left-0 size-[58%]")}
         />
         <ChatAvatar
           seed={avatars[1]}
-          className={cn(face, "top-[18%] right-0 size-[64%]")}
+          className={cn(face, "right-0 bottom-0 size-[58%]")}
         />
       </div>
     )

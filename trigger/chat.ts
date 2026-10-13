@@ -4,7 +4,7 @@ import { tool } from "ai"
 import { z } from "zod"
 
 import { ensureComputerUse, getBotSandbox } from "@/lib/daytona"
-import { getChatBot } from "@/queries/chats"
+import { getChat, getChatBot, type ChatBot, type ChatDetail } from "@/queries/chats"
 
 // The bot the user picked in the composer for this turn. Optional so a direct
 // chat (or an older client) falls back to the chat's first member.
@@ -20,15 +20,39 @@ async function resolveBot(chatId: string, botId?: string) {
 export const chatAgent = chat.agent({
   id: "chat",
   clientDataSchema,
-  tools: (event) => buildSandboxTools(event.chatId, event.clientData?.botId),
+  tools: async (event) => {
+    const chatDetail = await getChat(event.chatId)
+    const currentBot =
+      chatDetail?.members.find(
+        (member) => member.id === event.clientData?.botId
+      ) ?? chatDetail?.members[0]
+    return {
+      ...buildSandboxTools(event.chatId, event.clientData?.botId),
+      // A direct chat has one bot, so handoff only exists in groups. The tool
+      // must be declared here (not merged into `run`'s streamText), because the
+      // agent converts persisted history against this resolved set.
+      ...(chatDetail?.kind === "group"
+        ? buildHandoffTool(chatDetail, currentBot?.id)
+        : {}),
+    }
+  },
   run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
-    const bot = await resolveBot(chatId, clientData?.botId)
+    const chatDetail = await getChat(chatId)
+    const bot =
+      chatDetail?.members.find((member) => member.id === clientData?.botId) ??
+      chatDetail?.members[0]
+
+    // Tag the reply with its bot so the client can show that bot's avatar beside
+    // the message. Rides on the message (and the transcript), not the turn.
+    chat.setUIMessageStreamOptions({
+      messageMetadata: () => ({ botId: bot?.id }),
+    })
 
     return streamText({
       model: openai("gpt-6-astra"),
       messages,
       tools,
-      system: systemPrompt(bot),
+      system: systemPrompt(bot, chatDetail),
       abortSignal: signal,
     })
   },
@@ -214,7 +238,43 @@ function buildSandboxTools(chatId: string, botId?: string) {
   }
 }
 
-function systemPrompt(bot: Awaited<ReturnType<typeof getChatBot>>): string {
+// A group-chat-only tool. The bot names a teammate; the reply's tool result
+// carries that teammate's id, which the client uses to restart the turn as them.
+function buildHandoffTool(chatDetail: ChatDetail, currentBotId?: string) {
+  const teammates = chatDetail.members.filter(
+    (member) => member.id !== currentBotId
+  )
+  const choices = teammates
+    .map((member) => `${member.id}: ${member.name} (${member.job})`)
+    .join("; ")
+
+  return {
+    handoff: tool({
+      description: `Hand this request to a teammate in this group chat when they are better suited to answer it. Choose the teammate by botId from this list: ${choices}. After calling this, do not answer the request yourself - the teammate will respond.`,
+      inputSchema: z.object({
+        botId: z
+          .string()
+          .min(1)
+          .describe(`The botId of the teammate to hand off to: ${choices}.`),
+      }),
+      execute: async ({ botId }) => {
+        const target = teammates.find((member) => member.id === botId)
+        if (!target) {
+          return {
+            handedOff: false,
+            error: `There is no teammate with id "${botId}". Teammates: ${choices}.`,
+          }
+        }
+        return { handedOff: true, botId: target.id, name: target.name }
+      },
+    }),
+  }
+}
+
+function systemPrompt(
+  bot: ChatBot | undefined,
+  chatDetail: ChatDetail | null
+): string {
   if (!bot) {
     return [
       "Eres un compañero de equipo de IA.",
@@ -223,7 +283,7 @@ function systemPrompt(bot: Awaited<ReturnType<typeof getChatBot>>): string {
     ].join("\n")
   }
 
-  return [
+  const lines = [
     `Tu nombre es ${bot.name}.`,
     `Tu trabajo es: ${bot.job}.`,
     `Tu propósito es: ${bot.instructions?.trim() || "No se ha definido un propósito adicional."}`,
@@ -234,5 +294,29 @@ function systemPrompt(bot: Awaited<ReturnType<typeof getChatBot>>): string {
     "Usa el terminal y los archivos para tareas de sistema. Para sitios web o aplicaciones gráficas, inspecciona la pantalla, interactúa con el ratón y el teclado, y vuelve a revisarla después de cada cambio importante. No abras navegadores mediante bash.",
     "Mantén los comandos y cambios de archivos dentro del sandbox asignado.",
     "Si el usuario pide una captura o quiere ver qué aparece en pantalla, usa show_screen para mostrarla en el chat. Reserva view_screen para inspección interna; su resultado no se muestra al usuario.",
-  ].join("\n")
+  ]
+
+  if (chatDetail?.kind === "group") {
+    const teammates = chatDetail.members.filter(
+      (member) => member.id !== bot.id
+    )
+    lines.push(
+      `Estás en un chat grupal llamado "${chatDetail.name ?? "sin nombre"}": colaboras con otros compañeros de IA del equipo para ayudar al usuario.`,
+      "Tus herramientas son: bash, read_file, write_file y list_files para el terminal y los archivos; mouse_click, mouse_move, mouse_scroll, keyboard_type y keyboard_press para controlar la pantalla gráfica del sandbox; show_screen para mostrar la pantalla en el chat; view_screen solo para inspección interna; y handoff para derivar la petición a un compañero."
+    )
+    lines.push(
+      "Las herramientas de terminal y pantalla solo operan en tu propio sandbox.",
+      "Usa handoff solo cuando otro compañero este mejor preparado; el destino se elige por botId. Tras derivar, no respondas al usuario. El companero recibira la peticion original."
+    )
+    if (teammates.length > 0) {
+      lines.push(
+        `Tus compañeros en este chat: ${teammates
+          .map((member) => `${member.id}: ${member.name} (${member.job})`)
+          .join(", ")}.`,
+        "Si otro compañero esta mejor preparado, llama a handoff con su botId exacto y no respondas tu. El compañero recibira la peticion original y continuara la conversacion."
+      )
+    }
+  }
+
+  return lines.join("\n")
 }
